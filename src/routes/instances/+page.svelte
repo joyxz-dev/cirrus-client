@@ -8,18 +8,35 @@
 	let createError = $state<string | null>(null);
 
 	let name = $state('My Instance');
-	let mcVersion = $state('1.21.4');
+	let mcVersion = $state('');
 	let loader = $state<Loader>('fabric');
 	let loaderVersion = $state('');
-	let versionList = $state<string[]>([]);
+	let showSnapshots = $state(false);
+	let allVersions = $state<{ id: string; kind: string }[]>([]);
 	let loadingVersions = $state(false);
+
+	const visibleVersions = $derived(
+		showSnapshots ? allVersions : allVersions.filter((v) => v.kind === 'release')
+	);
+
+	$effect(() => {
+		if (showCreate && allVersions.length === 0) {
+			loadVersions();
+		}
+	});
+
+	$effect(() => {
+		if (visibleVersions.length > 0 && !mcVersion) {
+			mcVersion = visibleVersions[0].id;
+		}
+	});
 
 	async function loadVersions() {
 		loadingVersions = true;
 		try {
-			versionList = await commands.getVersionList();
+			allVersions = await commands.getVersionList();
 		} catch {
-			versionList = [];
+			allVersions = [];
 		} finally {
 			loadingVersions = false;
 		}
@@ -37,7 +54,7 @@
 			);
 			instances.update((list) => [inst, ...list]);
 			showCreate = false;
-			name = 'My Instance';
+			resetForm();
 		} catch (e) {
 			createError = String(e);
 		} finally {
@@ -45,8 +62,15 @@
 		}
 	}
 
+	function resetForm() {
+		name = 'My Instance';
+		mcVersion = visibleVersions[0]?.id ?? '';
+		loader = 'fabric';
+		loaderVersion = '';
+	}
+
 	async function handleDelete(id: string) {
-		if (!confirm('Delete this instance? This cannot be undone.')) return;
+		if (!confirm('Delete this instance? All files in its directory will be removed.')) return;
 		try {
 			await commands.deleteInstance(id);
 			instances.update((list) => list.filter((i) => i.id !== id));
@@ -54,12 +78,6 @@
 			alert(String(e));
 		}
 	}
-
-	$effect(() => {
-		if (showCreate && versionList.length === 0) {
-			loadVersions();
-		}
-	});
 </script>
 
 <div class="flex flex-col gap-6">
@@ -68,7 +86,7 @@
 		<button
 			class="px-4 py-2 rounded-lg text-sm font-medium"
 			style="background: var(--accent); color: #fff"
-			onclick={() => (showCreate = !showCreate)}
+			onclick={() => { showCreate = !showCreate; if (!showCreate) createError = null; }}
 		>
 			{showCreate ? 'Cancel' : 'New Instance'}
 		</button>
@@ -83,20 +101,30 @@
 				<input
 					bind:value={name}
 					class="px-3 py-2 rounded text-sm"
-					style="background: var(--bg-raised); border: 1px solid var(--border); color: var(--text-primary)"
+					style="background: var(--bg-raised); border: 1px solid var(--border); color: var(--text-primary); outline: none"
 				/>
 			</label>
 
-			<label class="flex flex-col gap-1">
-				<span class="text-xs" style="color: var(--text-secondary)">Minecraft Version</span>
-				{#if versionList.length > 0}
+			<div class="flex flex-col gap-1">
+				<div class="flex items-center justify-between">
+					<span class="text-xs" style="color: var(--text-secondary)">Minecraft Version</span>
+					<label class="flex items-center gap-1.5 cursor-pointer">
+						<input type="checkbox" bind:checked={showSnapshots} class="w-3 h-3" />
+						<span class="text-xs" style="color: var(--text-muted)">Show snapshots</span>
+					</label>
+				</div>
+				{#if loadingVersions}
+					<div class="px-3 py-2 rounded text-sm" style="background: var(--bg-raised); border: 1px solid var(--border); color: var(--text-muted)">
+						Loading versions…
+					</div>
+				{:else if visibleVersions.length > 0}
 					<select
 						bind:value={mcVersion}
 						class="px-3 py-2 rounded text-sm"
 						style="background: var(--bg-raised); border: 1px solid var(--border); color: var(--text-primary)"
 					>
-						{#each versionList as v}
-							<option value={v}>{v}</option>
+						{#each visibleVersions as v}
+							<option value={v.id}>{v.id}</option>
 						{/each}
 					</select>
 				{:else}
@@ -104,10 +132,10 @@
 						bind:value={mcVersion}
 						class="px-3 py-2 rounded text-sm"
 						style="background: var(--bg-raised); border: 1px solid var(--border); color: var(--text-primary)"
-						placeholder={loadingVersions ? 'Loading versions…' : '1.21.4'}
+						placeholder="e.g. 1.21.4"
 					/>
 				{/if}
-			</label>
+			</div>
 
 			<label class="flex flex-col gap-1">
 				<span class="text-xs" style="color: var(--text-secondary)">Loader</span>
@@ -126,7 +154,7 @@
 
 			{#if loader !== 'vanilla'}
 				<label class="flex flex-col gap-1">
-					<span class="text-xs" style="color: var(--text-secondary)">Loader Version (optional)</span>
+					<span class="text-xs" style="color: var(--text-secondary)">Loader Version <span style="color: var(--text-muted)">(optional, leave blank for latest)</span></span>
 					<input
 						bind:value={loaderVersion}
 						class="px-3 py-2 rounded text-sm"
@@ -144,7 +172,7 @@
 				class="px-4 py-2 rounded-lg text-sm font-medium self-end disabled:opacity-50"
 				style="background: var(--accent); color: #fff"
 				onclick={handleCreate}
-				disabled={creating || !name.trim()}
+				disabled={creating || !name.trim() || !mcVersion.trim()}
 			>
 				{creating ? 'Creating…' : 'Create'}
 			</button>
@@ -156,10 +184,10 @@
 	{:else if $instances.length === 0}
 		<div class="flex flex-col items-center justify-center gap-3 py-16">
 			<span class="text-4xl">📦</span>
-			<p class="text-sm" style="color: var(--text-muted)">No instances yet. Create one above.</p>
+			<p class="text-sm" style="color: var(--text-muted)">No instances yet.</p>
 		</div>
 	{:else}
-		<div class="grid gap-2" style="grid-template-columns: repeat(auto-fill, minmax(260px, 1fr))">
+		<div class="grid gap-3" style="grid-template-columns: repeat(auto-fill, minmax(260px, 1fr))">
 			{#each $instances as inst}
 				<div class="relative group">
 					<InstanceCard instance={inst} />

@@ -83,6 +83,12 @@ export interface ModVersion {
 	files: ModVersionFile[];
 }
 
+export interface DownloadProgress {
+	phase: string;
+	current: number;
+	total: number;
+}
+
 export const commands = {
 	getAccount: () => invoke<Account | null>('get_account'),
 	startAuth: () => invoke<DeviceCodeChallenge>('start_auth'),
@@ -95,7 +101,7 @@ export const commands = {
 	getInstance: (id: string) => invoke<Instance>('get_instance', { id }),
 	launchInstance: (id: string) => invoke<void>('launch_instance', { id }),
 	downloadVersion: (mcVersion: string) => invoke<void>('download_version', { mcVersion }),
-	getVersionList: () => invoke<string[]>('get_version_list'),
+	getVersionList: () => invoke<{ id: string; kind: string }[]>('get_version_list'),
 	setSyncOptions: (instanceId: string, enabled: boolean) =>
 		invoke<void>('set_sync_options', { instanceId, enabled }),
 

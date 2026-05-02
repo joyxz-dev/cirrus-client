@@ -9,7 +9,7 @@ use crate::instance::jvm_args::{build_jvm_args, detect_system_ram_mb};
 pub async fn launch_instance(
     app: &AppHandle,
     instance_id: &str,
-    mc_access_token: &str,
+    username: &str,
 ) -> Result<(), CirrusError> {
     let mut instance = get_instance(app, instance_id)?;
     let inst_dir = instance_dir(app, instance_id)?;
@@ -43,10 +43,9 @@ pub async fn launch_instance(
     args.push("-jar".into());
     args.push(jar_path.display().to_string());
     args.push("--username".into());
-    // Username will be resolved from account state by the caller; we receive it via token
-    args.push("Player".into()); // placeholder — real name comes from account state
+    args.push(username.into());
     args.push("--accessToken".into());
-    args.push(mc_access_token.into());
+    args.push("0".into()); // offline token — valid for offline-mode servers
     args.push("--gameDir".into());
     args.push(inst_dir.display().to_string());
     args.push("--assetsDir".into());

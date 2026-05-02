@@ -8,7 +8,14 @@ use auth::{Account, AccountState};
 use error::CirrusError;
 use instance::{Loader, Instance, InstalledMod};
 use mods::{ModSearchQuery, ModSearchResult, ModVersion};
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Emitter, State};
+
+fn http_client() -> Result<reqwest::Client, CirrusError> {
+    reqwest::Client::builder()
+        .user_agent("Cirrus/0.1.0 (cirrusclient.gg)")
+        .build()
+        .map_err(Into::into)
+}
 
 // ── Auth commands ─────────────────────────────────────────────────────────────
 
@@ -62,6 +69,8 @@ fn get_instance(app: AppHandle, id: String) -> Result<Instance, CirrusError> {
     instance::get_instance(&app, &id)
 }
 
+/// Download version files if not already cached, then launch the game.
+/// Emits `download:progress` events during download.
 #[tauri::command]
 async fn launch_instance(
     app: AppHandle,
@@ -69,35 +78,33 @@ async fn launch_instance(
     id: String,
 ) -> Result<(), CirrusError> {
     let guard = state.lock().await;
-    let _account = guard
+    let account = guard
         .as_ref()
-        .ok_or_else(|| CirrusError::Auth("Not logged in".into()))?;
+        .ok_or_else(|| CirrusError::Auth("Not logged in".into()))?
+        .clone();
     drop(guard);
 
-    // NOTE: access token is not passed to the frontend — we retrieve it here from in-memory state
-    // For Phase 1, we pass a placeholder; Phase 2 will wire in the real MC access token
-    instance::launch::launch_instance(&app, &id, "0").await
+    let inst = instance::get_instance(&app, &id)?;
+
+    // Download version files if not yet cached
+    if !instance::download::is_version_downloaded(&app, &inst.mc_version)? {
+        let client = http_client()?;
+        instance::download::download_version(&app, &client, &inst.mc_version).await?;
+    }
+
+    instance::launch::launch_instance(&app, &id, &account.username).await
 }
 
 #[tauri::command]
-async fn download_version(
-    app: AppHandle,
-    mc_version: String,
-) -> Result<(), CirrusError> {
-    let client = reqwest::Client::builder()
-        .user_agent("Cirrus/0.1.0 (cirrusclient.gg)")
-        .build()
-        .map_err(CirrusError::from)?;
+async fn download_version(app: AppHandle, mc_version: String) -> Result<(), CirrusError> {
+    let client = http_client()?;
     instance::download::download_version(&app, &client, &mc_version).await?;
     Ok(())
 }
 
 #[tauri::command]
-async fn get_version_list() -> Result<Vec<String>, CirrusError> {
-    let client = reqwest::Client::builder()
-        .user_agent("Cirrus/0.1.0 (cirrusclient.gg)")
-        .build()
-        .map_err(CirrusError::from)?;
+async fn get_version_list() -> Result<Vec<instance::download::VersionEntry>, CirrusError> {
+    let client = http_client()?;
     instance::download::get_version_list(&client).await
 }
 
@@ -146,11 +153,7 @@ async fn install_mod(
 }
 
 #[tauri::command]
-fn remove_mod(
-    app: AppHandle,
-    instance_id: String,
-    mod_id: String,
-) -> Result<(), CirrusError> {
+fn remove_mod(app: AppHandle, instance_id: String, mod_id: String) -> Result<(), CirrusError> {
     mods::installer::remove_mod(&app, &instance_id, &mod_id)
 }
 
@@ -169,12 +172,17 @@ pub fn run() {
         .plugin(tauri_plugin_log::Builder::default().level(log::LevelFilter::Info).build())
         .manage(account_state.clone())
         .setup(move |app| {
-            // Attempt to restore session from stored refresh token on startup
             let app_handle = app.handle().clone();
             let state = account_state.clone();
             tokio::spawn(async move {
-                if let Err(e) = auth::restore_session(&app_handle, &state).await {
-                    log::warn!("Session restore failed: {e}");
+                match auth::restore_session(&app_handle, &state).await {
+                    Ok(Some(account)) => {
+                        let _ = app_handle.emit("auth:complete", &account);
+                    }
+                    Ok(None) => {}
+                    Err(e) => {
+                        log::warn!("Session restore failed: {e}");
+                    }
                 }
             });
             Ok(())
