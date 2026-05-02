@@ -51,7 +51,7 @@ pub async fn start_auth(
 
     let app = app.clone();
     let state = state.clone();
-    tokio::spawn(async move {
+    tauri::async_runtime::spawn(async move {
         match finish_auth(&app, &state, client, session).await {
             Ok(account) => {
                 let _ = app.emit("auth:complete", &account);

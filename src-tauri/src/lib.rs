@@ -174,7 +174,7 @@ pub fn run() {
         .setup(move |app| {
             let app_handle = app.handle().clone();
             let state = account_state.clone();
-            tokio::spawn(async move {
+            tauri::async_runtime::spawn(async move {
                 match auth::restore_session(&app_handle, &state).await {
                     Ok(Some(account)) => {
                         let _ = app_handle.emit("auth:complete", &account);
