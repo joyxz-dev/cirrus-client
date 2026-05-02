@@ -31,10 +31,18 @@ fn build_client() -> Result<reqwest::Client, CirrusError> {
         .map_err(Into::into)
 }
 
-fn get_client_id() -> String {
-    option_env!("MSA_CLIENT_ID")
-        .unwrap_or("00000000402B5328")
-        .to_string()
+fn resolve_client_id(app: &AppHandle) -> Result<String, CirrusError> {
+    // 1. Runtime setting (stored by user in Settings)
+    if let Some(id) = store::load_client_id(app)? {
+        return Ok(id);
+    }
+    // 2. Compile-time env var (set via .env at build time)
+    if let Some(id) = option_env!("MSA_CLIENT_ID") {
+        return Ok(id.to_string());
+    }
+    Err(CirrusError::Auth(
+        "No Azure client ID configured. Go to Settings → Microsoft Auth to add one.".into(),
+    ))
 }
 
 /// Start auth: returns the device code challenge immediately,
@@ -44,7 +52,7 @@ pub async fn start_auth(
     state: &AccountState,
 ) -> Result<DeviceCodeChallenge, CirrusError> {
     let client = build_client()?;
-    let client_id = get_client_id();
+    let client_id = resolve_client_id(app)?;
 
     let session = microsoft::begin_device_code_flow(&client, &client_id).await?;
     let challenge = session.challenge.clone();
@@ -93,7 +101,7 @@ pub async fn restore_session(
     state: &AccountState,
 ) -> Result<Option<Account>, CirrusError> {
     let client = build_client()?;
-    let client_id = get_client_id();
+    let client_id = resolve_client_id(app)?;
 
     let Some(refresh) = store::load_refresh_token(app)? else {
         return Ok(None);

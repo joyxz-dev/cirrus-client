@@ -91,6 +91,8 @@ export interface DownloadProgress {
 
 export const commands = {
 	getAccount: () => invoke<Account | null>('get_account'),
+	getClientId: () => invoke<string | null>('get_client_id'),
+	setClientId: (clientId: string) => invoke<void>('set_client_id', { clientId }),
 	startAuth: () => invoke<DeviceCodeChallenge>('start_auth'),
 	logout: () => invoke<void>('logout'),
 

@@ -34,6 +34,20 @@ async fn start_auth(
 }
 
 #[tauri::command]
+fn get_client_id(app: AppHandle) -> Result<Option<String>, CirrusError> {
+    store::load_client_id(&app)
+}
+
+#[tauri::command]
+fn set_client_id(app: AppHandle, client_id: String) -> Result<(), CirrusError> {
+    let trimmed = client_id.trim().to_string();
+    if trimmed.is_empty() {
+        return Err(CirrusError::Auth("Client ID cannot be empty".into()));
+    }
+    store::save_client_id(&app, &trimmed)
+}
+
+#[tauri::command]
 async fn logout(
     app: AppHandle,
     state: State<'_, AccountState>,
@@ -189,6 +203,8 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             get_account,
+            get_client_id,
+            set_client_id,
             start_auth,
             logout,
             list_instances,
