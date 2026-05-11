@@ -54,7 +54,6 @@
 		background: var(--bg-raised);
 		border-color: var(--border-strong);
 		box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
-		transform: translateY(-1px);
 	}
 	.card.selected {
 		background: var(--bg-raised);
