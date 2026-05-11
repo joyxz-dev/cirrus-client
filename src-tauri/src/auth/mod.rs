@@ -5,6 +5,7 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter};
+use zeroize::Zeroizing;
 
 use crate::error::CirrusError;
 use crate::store;
@@ -18,7 +19,14 @@ pub struct Account {
     pub expires_at: u64,
 }
 
-pub type AccountState = Arc<Mutex<Option<Account>>>;
+/// Internal session — holds the public Account plus the in-memory MC token.
+/// The token never leaves the backend.
+pub struct InternalSession {
+    pub account: Account,
+    pub mc_token: Zeroizing<String>,
+}
+
+pub type AccountState = Arc<Mutex<Option<InternalSession>>>;
 
 pub fn new_account_state() -> AccountState {
     Arc::new(Mutex::new(None))
@@ -32,11 +40,9 @@ fn build_client() -> Result<reqwest::Client, CirrusError> {
 }
 
 fn resolve_client_id(app: &AppHandle) -> Result<String, CirrusError> {
-    // 1. Runtime setting (stored by user in Settings)
     if let Some(id) = store::load_client_id(app)? {
         return Ok(id);
     }
-    // 2. Compile-time env var (set via .env at build time)
     if let Some(id) = option_env!("AZURE_CLIENT_ID") {
         return Ok(id.to_string());
     }
@@ -45,8 +51,6 @@ fn resolve_client_id(app: &AppHandle) -> Result<String, CirrusError> {
     ))
 }
 
-/// Start auth: returns the device code challenge immediately,
-/// then spawns a background task that emits `auth:complete` or `auth:error`.
 pub async fn start_auth(
     app: &AppHandle,
     state: &AccountState,
@@ -80,18 +84,21 @@ async fn finish_auth(
     session: DeviceCodeSession,
 ) -> Result<Account, CirrusError> {
     let msa = microsoft::complete_device_code_flow(&client, session).await?;
-    let mc_session = minecraft::authenticate(&client, &msa.access_token).await?;
+    let mc = minecraft::authenticate(&client, &msa.access_token).await?;
 
     store::save_refresh_token(app, &msa.refresh_token)?;
 
     let account = Account {
-        uuid: mc_session.profile.id.clone(),
-        username: mc_session.profile.name.clone(),
-        expires_at: mc_session.expires_at,
+        uuid: mc.profile.id.clone(),
+        username: mc.profile.name.clone(),
+        expires_at: mc.expires_at,
     };
 
     let mut guard = state.lock().await;
-    *guard = Some(account.clone());
+    *guard = Some(InternalSession {
+        account: account.clone(),
+        mc_token: mc.access_token,
+    });
 
     Ok(account)
 }
@@ -113,16 +120,19 @@ pub async fn restore_session(
         store::save_refresh_token(app, &msa.refresh_token)?;
     }
 
-    let session = minecraft::authenticate(&client, &msa.access_token).await?;
+    let mc = minecraft::authenticate(&client, &msa.access_token).await?;
 
     let account = Account {
-        uuid: session.profile.id.clone(),
-        username: session.profile.name.clone(),
-        expires_at: session.expires_at,
+        uuid: mc.profile.id.clone(),
+        username: mc.profile.name.clone(),
+        expires_at: mc.expires_at,
     };
 
     let mut guard = state.lock().await;
-    *guard = Some(account.clone());
+    *guard = Some(InternalSession {
+        account: account.clone(),
+        mc_token: mc.access_token,
+    });
 
     Ok(Some(account))
 }

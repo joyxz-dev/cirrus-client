@@ -1,32 +1,127 @@
+use std::collections::HashMap;
 use std::path::PathBuf;
+use serde::Deserialize;
 use tauri::AppHandle;
 use tokio::process::Command;
+use zeroize::Zeroizing;
 
 use crate::error::CirrusError;
 use crate::instance::{cirrus_data_dir, instance_dir, get_instance, save_instance};
 use crate::instance::jvm_args::{build_jvm_args, detect_system_ram_mb};
 
+// Only the fields needed to build the launch command
+#[derive(Deserialize)]
+struct LaunchMeta {
+    #[serde(rename = "mainClass")]
+    main_class: String,
+    #[serde(rename = "assetIndex")]
+    asset_index: LaunchAssetRef,
+    libraries: Vec<LaunchLib>,
+}
+
+#[derive(Deserialize)]
+struct LaunchAssetRef {
+    id: String,
+}
+
+#[derive(Deserialize)]
+struct LaunchLib {
+    downloads: Option<LaunchLibDownloads>,
+    natives: Option<HashMap<String, String>>,
+    rules: Option<Vec<LaunchRule>>,
+}
+
+#[derive(Deserialize)]
+struct LaunchLibDownloads {
+    artifact: Option<LaunchArtifact>,
+}
+
+#[derive(Deserialize)]
+struct LaunchArtifact {
+    path: String,
+}
+
+#[derive(Deserialize)]
+struct LaunchRule {
+    action: String,
+    os: Option<LaunchOsRule>,
+}
+
+#[derive(Deserialize)]
+struct LaunchOsRule {
+    name: Option<String>,
+}
+
+fn current_os() -> &'static str {
+    if cfg!(windows) { "windows" }
+    else if cfg!(target_os = "macos") { "osx" }
+    else { "linux" }
+}
+
+fn lib_allowed(lib: &LaunchLib) -> bool {
+    let Some(rules) = &lib.rules else { return true };
+    let os = current_os();
+    let mut allowed = false;
+    for rule in rules {
+        let matches = rule.os.as_ref()
+            .and_then(|o| o.name.as_deref())
+            .map_or(true, |name| name == os);
+        if matches {
+            allowed = rule.action == "allow";
+        }
+    }
+    allowed
+}
+
 pub async fn launch_instance(
     app: &AppHandle,
     instance_id: &str,
     username: &str,
+    uuid: &str,
+    mc_token: &Zeroizing<String>,
 ) -> Result<(), CirrusError> {
     let mut instance = get_instance(app, instance_id)?;
     let inst_dir = instance_dir(app, instance_id)?;
     let data_dir = cirrus_data_dir(app)?;
 
     let java_bin = find_java(&data_dir)?;
-    let jar_path = data_dir
-        .join("versions")
-        .join(&instance.mc_version)
-        .join(format!("{}.jar", instance.mc_version));
+
+    let versions_dir = data_dir.join("versions").join(&instance.mc_version);
+    let jar_path = versions_dir.join(format!("{}.jar", instance.mc_version));
+    let meta_path = versions_dir.join(format!("{}.json", instance.mc_version));
+    let natives_dir = versions_dir.join("natives");
 
     if !jar_path.exists() {
         return Err(CirrusError::Launch(format!(
-            "Client jar not found for {}. Please download the version first.",
+            "Client jar not found for {}. Download it first.",
             instance.mc_version
         )));
     }
+    if !meta_path.exists() {
+        return Err(CirrusError::Launch(format!(
+            "Version metadata not found for {}. Re-download the version.",
+            instance.mc_version
+        )));
+    }
+
+    let meta_text = std::fs::read_to_string(&meta_path)?;
+    let meta: LaunchMeta = serde_json::from_str(&meta_text)
+        .map_err(|e| CirrusError::Launch(format!("Failed to parse version JSON: {e}")))?;
+
+    let libs_dir = data_dir.join("libraries");
+
+    // Build classpath: platform-filtered libs + client jar
+    let mut cp: Vec<String> = meta
+        .libraries
+        .iter()
+        .filter(|l| lib_allowed(l) && l.natives.is_none())
+        .filter_map(|l| l.downloads.as_ref()?.artifact.as_ref())
+        .map(|a| libs_dir.join(&a.path).display().to_string())
+        .collect();
+    cp.push(jar_path.display().to_string());
+
+    let cp_sep = if cfg!(windows) { ";" } else { ":" };
+    let classpath = cp.join(cp_sep);
 
     let ram = if instance.allocated_ram_mb > 0 {
         instance.allocated_ram_mb
@@ -34,30 +129,43 @@ pub async fn launch_instance(
         detect_system_ram_mb()
     };
 
-    let mut args = build_jvm_args(ram, &inst_dir);
-
-    // Append user-defined extra JVM args
+    let mut args = build_jvm_args(ram);
     args.extend(instance.jvm_args.iter().cloned());
 
-    // Minecraft launch args
-    args.push("-jar".into());
-    args.push(jar_path.display().to_string());
+    // Natives path (needed for LWJGL 2; LWJGL 3 ignores it or uses --nativesDirectory)
+    std::fs::create_dir_all(&natives_dir)?;
+    args.push(format!("-Djava.library.path={}", natives_dir.display()));
+
+    // Classpath and main class
+    args.push("-cp".into());
+    args.push(classpath);
+    args.push(meta.main_class.clone());
+
+    // Game arguments
     args.push("--username".into());
     args.push(username.into());
     args.push("--accessToken".into());
-    args.push("0".into()); // offline token — valid for offline-mode servers
+    args.push(mc_token.as_str().into());
+    args.push("--uuid".into());
+    args.push(uuid.into());
+    args.push("--userType".into());
+    args.push("mojang".into());
+    args.push("--version".into());
+    args.push(instance.mc_version.clone());
     args.push("--gameDir".into());
     args.push(inst_dir.display().to_string());
     args.push("--assetsDir".into());
     args.push(data_dir.join("assets").display().to_string());
-    args.push("--version".into());
-    args.push(instance.mc_version.clone());
+    args.push("--assetIndex".into());
+    args.push(meta.asset_index.id.clone());
+    args.push("--nativesDirectory".into());
+    args.push(natives_dir.display().to_string());
 
-    if let Some(res) = Some(&instance.resolution) {
+    if instance.resolution.width > 0 && instance.resolution.height > 0 {
         args.push("--width".into());
-        args.push(res.width.to_string());
+        args.push(instance.resolution.width.to_string());
         args.push("--height".into());
-        args.push(res.height.to_string());
+        args.push(instance.resolution.height.to_string());
     }
 
     let _child = Command::new(&java_bin)
@@ -66,7 +174,6 @@ pub async fn launch_instance(
         .spawn()
         .map_err(|e| CirrusError::Launch(format!("Failed to spawn JVM: {e}")))?;
 
-    // Update lastPlayedAt
     instance.last_played_at = Some(chrono::Utc::now().timestamp_millis() as u64);
     save_instance(app, &instance)?;
 
@@ -74,7 +181,6 @@ pub async fn launch_instance(
 }
 
 fn find_java(data_dir: &PathBuf) -> Result<PathBuf, CirrusError> {
-    // 1. Check managed Java in cirrus data dir
     let managed = data_dir.join("java");
     if managed.exists() {
         for entry in std::fs::read_dir(&managed)
@@ -88,10 +194,8 @@ fn find_java(data_dir: &PathBuf) -> Result<PathBuf, CirrusError> {
         }
     }
 
-    // 2. Fall back to system Java
-    let system = PathBuf::from(java_exe());
     if which_java().is_some() {
-        return Ok(system);
+        return Ok(PathBuf::from(java_exe()));
     }
 
     Err(CirrusError::Launch(

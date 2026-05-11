@@ -21,7 +21,7 @@ fn http_client() -> Result<reqwest::Client, CirrusError> {
 
 #[tauri::command]
 async fn get_account(state: State<'_, AccountState>) -> Result<Option<Account>, CirrusError> {
-    Ok(state.lock().await.clone())
+    Ok(state.lock().await.as_ref().map(|s| s.account.clone()))
 }
 
 #[tauri::command]
@@ -91,22 +91,33 @@ async fn launch_instance(
     state: State<'_, AccountState>,
     id: String,
 ) -> Result<(), CirrusError> {
-    let guard = state.lock().await;
-    let account = guard
-        .as_ref()
-        .ok_or_else(|| CirrusError::Auth("Not logged in".into()))?
-        .clone();
-    drop(guard);
+    let (username, uuid, mc_token, expires_at) = {
+        let guard = state.lock().await;
+        let session = guard
+            .as_ref()
+            .ok_or_else(|| CirrusError::Auth("Not logged in".into()))?;
+        (
+            session.account.username.clone(),
+            session.account.uuid.clone(),
+            session.mc_token.clone(),
+            session.account.expires_at,
+        )
+    };
+
+    if chrono::Utc::now().timestamp() as u64 >= expires_at {
+        return Err(CirrusError::Auth(
+            "Session expired. Please sign out and sign in again.".into(),
+        ));
+    }
 
     let inst = instance::get_instance(&app, &id)?;
 
-    // Download version files if not yet cached
     if !instance::download::is_version_downloaded(&app, &inst.mc_version)? {
         let client = http_client()?;
         instance::download::download_version(&app, &client, &inst.mc_version).await?;
     }
 
-    instance::launch::launch_instance(&app, &id, &account.username).await
+    instance::launch::launch_instance(&app, &id, &username, &uuid, &mc_token).await
 }
 
 #[tauri::command]

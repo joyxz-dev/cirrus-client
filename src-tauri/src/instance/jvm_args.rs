@@ -1,4 +1,4 @@
-pub fn build_jvm_args(allocated_ram_mb: u32, instance_path: &std::path::Path) -> Vec<String> {
+pub fn build_jvm_args(allocated_ram_mb: u32) -> Vec<String> {
     let xms = allocated_ram_mb / 2;
     let xmx = allocated_ram_mb;
 
@@ -23,26 +23,17 @@ pub fn build_jvm_args(allocated_ram_mb: u32, instance_path: &std::path::Path) ->
         "-XX:SurvivorRatio=32".into(),
         "-XX:+PerfDisableSharedMem".into(),
         "-XX:MaxTenuringThreshold=1".into(),
-        format!("--gameDir={}", instance_path.display()),
     ]
 }
 
 pub fn detect_system_ram_mb() -> u32 {
-    // Attempt to read from /proc/meminfo (Linux) — on Windows/macOS this will fail and we use default
-    #[cfg(target_os = "linux")]
-    {
-        if let Ok(data) = std::fs::read_to_string("/proc/meminfo") {
-            for line in data.lines() {
-                if line.starts_with("MemTotal:") {
-                    if let Some(kb) = line.split_whitespace().nth(1) {
-                        if let Ok(kb) = kb.parse::<u64>() {
-                            let mb = (kb / 1024) as u32;
-                            return (mb / 2).clamp(1024, 8192);
-                        }
-                    }
-                }
-            }
-        }
+    use sysinfo::System;
+    let mut sys = System::new();
+    sys.refresh_memory();
+    let total = sys.total_memory();
+    if total > 0 {
+        let mb = (total / (1024 * 1024)) as u32;
+        return (mb / 2).clamp(1024, 8192);
     }
     2048
 }

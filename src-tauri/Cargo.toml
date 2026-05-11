@@ -38,6 +38,7 @@ chrono = { version = "0.4", features = ["serde"] }
 zeroize = { version = "1", features = ["derive"] }
 log = "0.4"
 env_logger = "0.11"
+sysinfo = { version = "0.31", default-features = false, features = ["system"] }
 
 [profile.release]
 opt-level = "z"

@@ -70,11 +70,14 @@ struct Library {
     downloads: Option<LibraryDownloads>,
     #[allow(dead_code)]
     name: String,
+    natives: Option<HashMap<String, String>>,
+    rules: Option<Vec<LibraryRule>>,
 }
 
 #[derive(Deserialize)]
 struct LibraryDownloads {
     artifact: Option<LibraryArtifact>,
+    classifiers: Option<HashMap<String, LibraryArtifact>>,
 }
 
 #[derive(Deserialize, Clone)]
@@ -84,11 +87,43 @@ struct LibraryArtifact {
     path: String,
 }
 
+#[derive(Deserialize)]
+struct LibraryRule {
+    action: String,
+    os: Option<OsRule>,
+}
+
+#[derive(Deserialize)]
+struct OsRule {
+    name: Option<String>,
+}
+
 #[derive(Serialize, Clone)]
 pub struct DownloadProgress {
     pub phase: String,
     pub current: u64,
     pub total: u64,
+}
+
+fn platform_os() -> &'static str {
+    if cfg!(windows) { "windows" }
+    else if cfg!(target_os = "macos") { "osx" }
+    else { "linux" }
+}
+
+fn lib_allowed(rules: &Option<Vec<LibraryRule>>) -> bool {
+    let Some(rules) = rules else { return true };
+    let os = platform_os();
+    let mut allowed = false;
+    for rule in rules {
+        let matches = rule.os.as_ref()
+            .and_then(|o| o.name.as_deref())
+            .map_or(true, |name| name == os);
+        if matches {
+            allowed = rule.action == "allow";
+        }
+    }
+    allowed
 }
 
 pub async fn get_version_list(client: &reqwest::Client) -> Result<Vec<VersionEntry>, CirrusError> {
@@ -104,11 +139,9 @@ pub async fn get_version_list(client: &reqwest::Client) -> Result<Vec<VersionEnt
 
 pub fn is_version_downloaded(app: &AppHandle, mc_version: &str) -> Result<bool, CirrusError> {
     let data_dir = cirrus_data_dir(app)?;
-    let jar = data_dir
-        .join("versions")
-        .join(mc_version)
-        .join(format!("{mc_version}.jar"));
-    Ok(jar.exists())
+    let base = data_dir.join("versions").join(mc_version);
+    Ok(base.join(format!("{mc_version}.jar")).exists()
+        && base.join(format!("{mc_version}.json")).exists())
 }
 
 pub async fn download_version(
@@ -120,6 +153,7 @@ pub async fn download_version(
     let versions_dir = data_dir.join("versions").join(mc_version);
     std::fs::create_dir_all(&versions_dir)?;
 
+    // Fetch version manifest
     let manifest: VersionManifest = client
         .get(VERSION_MANIFEST)
         .send()
@@ -134,17 +168,21 @@ pub async fn download_version(
         .find(|v| v.id == mc_version)
         .ok_or_else(|| CirrusError::Instance(format!("Version {mc_version} not found")))?;
 
-    let meta: VersionMeta = client
+    // Fetch and save version JSON (needed at launch time for mainClass etc.)
+    let meta_json_path = versions_dir.join(format!("{mc_version}.json"));
+    let meta_text = client
         .get(&entry.url)
         .send()
         .await?
         .error_for_status()?
-        .json()
+        .text()
         .await?;
+    let meta: VersionMeta = serde_json::from_str(&meta_text)?;
+    std::fs::write(&meta_json_path, &meta_text)?;
 
     emit_progress(app, "client", 0, 1);
 
-    // Download client jar
+    // Client jar
     let jar_path = versions_dir.join(format!("{mc_version}.jar"));
     download_and_verify(
         client,
@@ -156,7 +194,7 @@ pub async fn download_version(
     .await?;
     emit_progress(app, "client", 1, 1);
 
-    // Download asset index
+    // Asset index
     let assets_dir = data_dir.join("assets");
     let index_dir = assets_dir.join("indexes");
     std::fs::create_dir_all(&index_dir)?;
@@ -170,14 +208,14 @@ pub async fn download_version(
     )
     .await?;
 
-    // Download assets
+    // Assets
     let objects_dir = assets_dir.join("objects");
     let index_data = std::fs::read_to_string(&index_path)?;
     let asset_index: AssetIndex = serde_json::from_str(&index_data)?;
     let total_assets = asset_index.objects.len() as u64;
     let mut done = 0u64;
 
-    for (_, obj) in &asset_index.objects {
+    for obj in asset_index.objects.values() {
         let prefix = &obj.hash[..2];
         let obj_dir = objects_dir.join(prefix);
         std::fs::create_dir_all(&obj_dir)?;
@@ -190,17 +228,18 @@ pub async fn download_version(
         }
     }
 
-    // Download libraries
+    // Libraries
     let libs_dir = data_dir.join("libraries");
-    let libs: Vec<_> = meta
+    let lib_artifacts: Vec<_> = meta
         .libraries
         .iter()
+        .filter(|l| lib_allowed(&l.rules))
         .filter_map(|l| l.downloads.as_ref()?.artifact.as_ref().map(|a| a.clone()))
         .collect();
-    let total_libs = libs.len() as u64;
+    let total_libs = lib_artifacts.len() as u64;
     let mut lib_done = 0u64;
 
-    for artifact in &libs {
+    for artifact in &lib_artifacts {
         let lib_path = libs_dir.join(&artifact.path);
         if let Some(parent) = lib_path.parent() {
             std::fs::create_dir_all(parent)?;
@@ -213,7 +252,63 @@ pub async fn download_version(
         }
     }
 
+    // Native libraries
+    let natives_dir = versions_dir.join("natives");
+    std::fs::create_dir_all(&natives_dir)?;
+    download_natives(client, &meta.libraries, &libs_dir, &natives_dir).await?;
+
     Ok(jar_path)
+}
+
+async fn download_natives(
+    client: &reqwest::Client,
+    libs: &[Library],
+    libs_dir: &Path,
+    natives_dir: &Path,
+) -> Result<(), CirrusError> {
+    let os = platform_os();
+
+    for lib in libs {
+        let Some(natives_map) = &lib.natives else { continue };
+        let Some(classifier_key) = natives_map.get(os) else { continue };
+        let Some(downloads) = &lib.downloads else { continue };
+        let Some(classifiers) = &downloads.classifiers else { continue };
+        let Some(artifact) = classifiers.get(classifier_key.as_str()) else { continue };
+
+        let jar_path = libs_dir.join(&artifact.path);
+        if let Some(parent) = jar_path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        download_and_verify(client, &artifact.url, &jar_path, &artifact.sha1, HashAlgo::Sha1)
+            .await?;
+        extract_natives(&jar_path, natives_dir)?;
+    }
+    Ok(())
+}
+
+fn extract_natives(jar_path: &Path, dest_dir: &Path) -> Result<(), CirrusError> {
+    let file = std::fs::File::open(jar_path)?;
+    let mut archive = zip::ZipArchive::new(file)
+        .map_err(|e| CirrusError::Instance(format!("Failed to open native JAR: {e}")))?;
+
+    for i in 0..archive.len() {
+        let mut entry = archive
+            .by_index(i)
+            .map_err(|e| CirrusError::Instance(format!("ZIP read error: {e}")))?;
+
+        let name = entry.name().to_string();
+        if entry.is_dir() || name.starts_with("META-INF/") {
+            continue;
+        }
+
+        let out_path = dest_dir.join(&name);
+        if let Some(parent) = out_path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        let mut out = std::fs::File::create(&out_path)?;
+        std::io::copy(&mut entry, &mut out)?;
+    }
+    Ok(())
 }
 
 fn emit_progress(app: &AppHandle, phase: &str, current: u64, total: u64) {
