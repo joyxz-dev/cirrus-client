@@ -148,69 +148,58 @@
 		<p class="text-sm select-text cursor-text" style="color: var(--danger)">Sign-in error: {$authError}</p>
 	{/if}
 
-	<!-- Main content -->
-	<div class="flex gap-6 flex-1 min-h-0">
-		<!-- Instance list -->
-		<div class="flex flex-col gap-2 w-72 overflow-y-auto flex-shrink-0">
-			<div class="flex items-center justify-between mb-1">
-				<span class="text-xs font-medium uppercase tracking-wider" style="color: var(--text-muted)">Instances</span>
-				<a href="/instances" class="text-xs" style="color: var(--accent)">Manage</a>
-			</div>
-			{#if $instances.length === 0}
+	<!-- Instance grid -->
+	<div class="flex-1 overflow-y-auto">
+		{#if $instances.length === 0}
+			<div class="flex flex-col items-center justify-center h-full gap-3">
 				<p class="text-sm" style="color: var(--text-muted)">
 					No instances yet. <a href="/instances" style="color: var(--accent)">Create one</a>
 				</p>
-			{:else}
+			</div>
+		{:else}
+			<div class="grid gap-3" style="grid-template-columns: repeat(auto-fill, minmax(220px, 1fr))">
 				{#each $instances as inst}
-					<InstanceCard
-						instance={inst}
-						selected={$selectedInstance?.id === inst.id}
+					<button
+						class="text-left w-full rounded-lg border transition-colors"
+						style="background: {$selectedInstance?.id === inst.id ? 'var(--bg-raised)' : 'var(--bg-surface)'}; border-color: {$selectedInstance?.id === inst.id ? 'var(--accent)' : 'var(--border)'}; padding: 0"
 						onclick={() => selectedInstance.set(inst)}
-					/>
+					>
+						<InstanceCard instance={inst} selected={$selectedInstance?.id === inst.id} />
+					</button>
 				{/each}
+			</div>
+		{/if}
+	</div>
+
+	<!-- Launch bar -->
+	{#if $selectedInstance}
+		<div class="flex flex-col gap-2 pt-3 border-t" style="border-color: var(--border)">
+			{#if $launchState === 'downloading'}
+				<ProgressBar label={$launchMessage} value={$launchProgress} />
 			{/if}
-		</div>
 
-		<!-- Launch panel -->
-		<div class="flex-1 flex flex-col gap-4">
-			{#if $selectedInstance}
-				<div class="p-4 rounded-lg border" style="background: var(--bg-surface); border-color: var(--border)">
-					<h2 class="font-semibold mb-1">{$selectedInstance.name}</h2>
-					<p class="text-xs" style="color: var(--text-secondary)">
-						Minecraft {$selectedInstance.mcVersion} · {$selectedInstance.loader}{#if $selectedInstance.loaderVersion}&nbsp;{$selectedInstance.loaderVersion}{/if}
-					</p>
-					<p class="text-xs mt-1" style="color: var(--text-muted)">
-						{$selectedInstance.allocatedRamMb} MB RAM · {$selectedInstance.mods.length} mod{$selectedInstance.mods.length !== 1 ? 's' : ''}
-					</p>
+			{#if $launchError}
+				<p class="text-xs select-text cursor-text" style="color: var(--danger)">{$launchError}</p>
+			{/if}
+
+			<div class="flex items-center justify-between">
+				<div class="flex flex-col">
+					<span class="text-sm font-medium">{$selectedInstance.name}</span>
+					<span class="text-xs" style="color: var(--text-muted)">
+						MC {$selectedInstance.mcVersion} · {$selectedInstance.loader}
+						· {$selectedInstance.allocatedRamMb} MB
+					</span>
 				</div>
-
-				<div class="flex-1"></div>
-
-				{#if $launchState === 'downloading'}
-					<ProgressBar label={$launchMessage} value={$launchProgress} />
-				{/if}
-
-				{#if $launchError}
-					<p class="text-xs select-text cursor-text" style="color: var(--danger)">{$launchError}</p>
-				{/if}
-
-				<div class="flex items-center justify-between">
-					{#if !$account}
-						<p class="text-xs" style="color: var(--text-muted)">Sign in to launch</p>
-					{:else}
-						<span></span>
-					{/if}
+				{#if !$account}
+					<p class="text-xs" style="color: var(--text-muted)">Sign in to launch</p>
+				{:else}
 					<LaunchButton
 						state={$launchState}
-						disabled={!$account}
+						disabled={false}
 						onclick={handleLaunch}
 					/>
-				</div>
-			{:else}
-				<div class="flex-1 flex items-center justify-center">
-					<p class="text-sm" style="color: var(--text-muted)">Select an instance to launch</p>
-				</div>
-			{/if}
+				{/if}
+			</div>
 		</div>
-	</div>
+	{/if}
 </div>

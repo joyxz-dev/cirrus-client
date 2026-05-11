@@ -146,7 +146,10 @@ pub fn create_instance(
     loader: Loader,
     loader_version: Option<String>,
 ) -> Result<Instance, CirrusError> {
-    let inst = Instance::new(name, mc_version, loader, loader_version);
+    let (ram, w, h) = crate::store::load_defaults(app);
+    let mut inst = Instance::new(name, mc_version, loader, loader_version);
+    inst.allocated_ram_mb = ram;
+    inst.resolution = Resolution { width: w, height: h };
     save_instance(app, &inst)?;
     sync::setup_sync(app, &inst)?;
     Ok(inst)

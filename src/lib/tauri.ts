@@ -110,6 +110,13 @@ export const commands = {
 	setSyncOptions: (instanceId: string, enabled: boolean) =>
 		invoke<void>('set_sync_options', { instanceId, enabled }),
 
+	getDefaults: () => invoke<[number, number, number]>('get_defaults'),
+	setDefaults: (ramMb: number, width: number, height: number) =>
+		invoke<void>('set_defaults', { ramMb, width, height }),
+	openInstanceFolder: (id: string) => invoke<void>('open_instance_folder', { id }),
+	listInstanceFolder: (id: string, subfolder: string) =>
+		invoke<string[]>('list_instance_folder', { id, subfolder }),
+
 	searchMods: (query: ModSearchQuery) => invoke<ModSearchResult>('search_mods', { query }),
 	getModVersions: (projectId: string, loader?: string, mcVersion?: string) =>
 		invoke<ModVersion[]>('get_mod_versions', { projectId, loader, mcVersion }),

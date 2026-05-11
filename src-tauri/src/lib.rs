@@ -161,6 +161,55 @@ fn set_sync_options(
     instance::save_instance(&app, &inst)
 }
 
+// ── Defaults commands ─────────────────────────────────────────────────────────
+
+#[tauri::command]
+fn get_defaults(app: AppHandle) -> Result<(u32, u32, u32), CirrusError> {
+    Ok(store::load_defaults(&app))
+}
+
+#[tauri::command]
+fn set_defaults(app: AppHandle, ram_mb: u32, width: u32, height: u32) -> Result<(), CirrusError> {
+    store::save_defaults(&app, ram_mb.clamp(512, 65536), width, height)
+}
+
+#[tauri::command]
+fn open_instance_folder(app: AppHandle, id: String) -> Result<(), CirrusError> {
+    let dir = instance::instance_dir(&app, &id)?;
+    if !dir.exists() {
+        return Err(CirrusError::Instance("Instance folder not found".into()));
+    }
+    #[cfg(target_os = "windows")]
+    std::process::Command::new("explorer").arg(&dir).spawn().ok();
+    #[cfg(target_os = "macos")]
+    std::process::Command::new("open").arg(&dir).spawn().ok();
+    #[cfg(target_os = "linux")]
+    std::process::Command::new("xdg-open").arg(&dir).spawn().ok();
+    Ok(())
+}
+
+const ALLOWED_SUBFOLDERS: &[&str] = &["mods", "resourcepacks", "shaderpacks", "saves", "screenshots"];
+
+#[tauri::command]
+fn list_instance_folder(app: AppHandle, id: String, subfolder: String) -> Result<Vec<String>, CirrusError> {
+    if !ALLOWED_SUBFOLDERS.contains(&subfolder.as_str()) {
+        return Err(CirrusError::Security("Subfolder not allowed".into()));
+    }
+    let dir = instance::instance_dir(&app, &id)?.join(&subfolder);
+    if !dir.exists() {
+        return Ok(vec![]);
+    }
+    let mut names = vec![];
+    for entry in std::fs::read_dir(&dir)? {
+        let entry = entry?;
+        if let Some(name) = entry.file_name().to_str() {
+            names.push(name.to_string());
+        }
+    }
+    names.sort();
+    Ok(names)
+}
+
 // ── Mods commands ─────────────────────────────────────────────────────────────
 
 #[tauri::command]
@@ -239,6 +288,10 @@ pub fn run() {
             download_version,
             get_version_list,
             set_sync_options,
+            get_defaults,
+            set_defaults,
+            open_instance_folder,
+            list_instance_folder,
             search_mods,
             get_mod_versions,
             install_mod,

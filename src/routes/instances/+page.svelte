@@ -61,49 +61,55 @@
 		try {
 			await commands.deleteInstance(id);
 			instances.update((list) => list.filter((i) => i.id !== id));
-			if (editingInst?.id === id) editingInst = null;
+			if (selectedInst?.id === id) selectedInst = null;
+			if (openedInst?.id === id) openedInst = null;
 		} catch (e) {
 			alert(String(e));
 		}
 	}
 
-	// ── Edit ─────────────────────────────────────────────────────────────────────
-	let editingInst = $state<Instance | null>(null);
-	let editName = $state('');
-	let editRam = $state(2048);
-	let editWidth = $state(1920);
-	let editHeight = $state(1080);
-	let editSaving = $state(false);
-	let editError = $state('');
+	// ── Selection & opening ───────────────────────────────────────────────────────
+	let selectedInst = $state<Instance | null>(null);
+	let openedInst = $state<Instance | null>(null);
+	let activeTab = $state<'mods' | 'resourcepacks' | 'shaderpacks' | 'saves' | 'screenshots'>('mods');
+	let folderContents = $state<string[]>([]);
+	let folderLoading = $state(false);
 
-	function startEdit(inst: Instance) {
-		if (editingInst?.id === inst.id) { editingInst = null; return; }
-		editingInst = inst;
-		editName = inst.name;
-		editRam = inst.allocatedRamMb;
-		editWidth = inst.resolution.width;
-		editHeight = inst.resolution.height;
-		editError = '';
+	let clickTimer: ReturnType<typeof setTimeout> | null = null;
+
+	async function handleCardClick(inst: Instance) {
+		if (clickTimer) {
+			// double-click
+			clearTimeout(clickTimer);
+			clickTimer = null;
+			await openInstance(inst);
+		} else {
+			clickTimer = setTimeout(() => {
+				clickTimer = null;
+				selectedInst = inst;
+				selectedInstance.set(inst);
+			}, 220);
+		}
 	}
 
-	async function saveEdit() {
-		if (!editingInst) return;
-		editSaving = true;
-		editError = '';
+	async function openInstance(inst: Instance) {
+		selectedInst = inst;
+		selectedInstance.set(inst);
+		openedInst = inst;
+		activeTab = 'mods';
+		await loadTab('mods', inst.id);
+	}
+
+	async function loadTab(tab: typeof activeTab, id: string) {
+		activeTab = tab;
+		if (tab === 'mods') { folderContents = []; return; }
+		folderLoading = true;
 		try {
-			const updated = await commands.updateInstance(editingInst.id, {
-				name: editName,
-				allocatedRamMb: editRam,
-				resolutionWidth: editWidth,
-				resolutionHeight: editHeight,
-			});
-			instances.update((list) => list.map((i) => (i.id === updated.id ? updated : i)));
-			if ($selectedInstance?.id === updated.id) selectedInstance.set(updated);
-			editingInst = null;
-		} catch (e) {
-			editError = String(e);
+			folderContents = await commands.listInstanceFolder(id, tab);
+		} catch {
+			folderContents = [];
 		} finally {
-			editSaving = false;
+			folderLoading = false;
 		}
 	}
 </script>
@@ -193,7 +199,7 @@
 		</div>
 	{/if}
 
-	<!-- Instance list -->
+	<!-- Instance grid -->
 	{#if $instancesLoading}
 		<p class="text-sm" style="color: var(--text-muted)">Loading…</p>
 	{:else if $instances.length === 0}
@@ -201,119 +207,117 @@
 			<p class="text-sm" style="color: var(--text-muted)">No instances yet.</p>
 		</div>
 	{:else}
+		<p class="text-xs" style="color: var(--text-muted)">Click to select · Double-click to open</p>
 		<div class="grid gap-3" style="grid-template-columns: repeat(auto-fill, minmax(260px, 1fr))">
 			{#each $instances as inst}
 				<div class="relative group">
-					<InstanceCard
-						instance={inst}
-						selected={editingInst?.id === inst.id}
-					/>
-					<!-- Edit button -->
 					<button
-						class="absolute top-2 right-9 w-6 h-6 rounded text-xs opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center"
-						style="background: var(--bg-hover); color: var(--text-secondary)"
-						onclick={() => startEdit(inst)}
-						title="Edit instance"
-					>✎</button>
+						class="w-full text-left rounded-lg border transition-colors"
+						style="background: {selectedInst?.id === inst.id ? 'var(--bg-raised)' : 'var(--bg-surface)'}; border-color: {openedInst?.id === inst.id ? 'var(--accent)' : selectedInst?.id === inst.id ? 'var(--accent)' : 'var(--border)'}; padding: 0"
+						onclick={() => handleCardClick(inst)}
+					>
+						<InstanceCard instance={inst} selected={selectedInst?.id === inst.id} />
+					</button>
 					<!-- Delete button -->
 					<button
 						class="absolute top-2 right-2 w-6 h-6 rounded text-xs opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center"
 						style="background: var(--danger); color: #fff"
-						onclick={() => handleDelete(inst.id)}
+						onclick={(e) => { e.stopPropagation(); handleDelete(inst.id); }}
 						title="Delete instance"
 					>✕</button>
 				</div>
 			{/each}
 		</div>
 
-		<!-- Edit panel -->
-		{#if editingInst}
+		<!-- Detail panel -->
+		{#if openedInst}
 			<div class="p-4 rounded-lg border flex flex-col gap-4" style="background: var(--bg-surface); border-color: var(--accent)">
-				<h2 class="text-sm font-semibold">Edit — {editingInst.name}</h2>
-
-				<label class="flex flex-col gap-1">
-					<span class="text-xs" style="color: var(--text-secondary)">Name</span>
-					<input
-						bind:value={editName}
-						class="px-3 py-2 rounded text-sm"
-						style="background: var(--bg-raised); border: 1px solid var(--border); color: var(--text-primary); outline: none"
-					/>
-				</label>
-
-				<div class="flex flex-col gap-2">
-					<div class="flex items-center justify-between">
-						<span class="text-xs" style="color: var(--text-secondary)">Allocated RAM</span>
-						<div class="flex items-center gap-1.5">
-							<input
-								type="number"
-								bind:value={editRam}
-								min="512"
-								max="65536"
-								step="256"
-								class="w-20 px-2 py-1 rounded text-sm text-right font-mono"
-								style="background: var(--bg-raised); border: 1px solid var(--border); color: var(--accent); outline: none"
-							/>
-							<span class="text-xs" style="color: var(--text-muted)">MB</span>
-						</div>
+				<!-- Panel header -->
+				<div class="flex items-center justify-between">
+					<div>
+						<h2 class="text-sm font-semibold">{openedInst.name}</h2>
+						<p class="text-xs" style="color: var(--text-muted)">
+							MC {openedInst.mcVersion} · {openedInst.loader}
+							{#if openedInst.loaderVersion}&nbsp;{openedInst.loaderVersion}{/if}
+						</p>
 					</div>
-					<input
-						type="range"
-						bind:value={editRam}
-						min="512"
-						max="16384"
-						step="256"
-						class="w-full"
-						style="accent-color: var(--accent)"
-					/>
-					<div class="flex justify-between text-xs" style="color: var(--text-muted)">
-						<span>512 MB</span>
-						<span>16 GB</span>
-					</div>
-				</div>
-
-				<div class="flex items-center justify-between gap-4">
-					<span class="text-xs" style="color: var(--text-secondary)">Resolution</span>
 					<div class="flex items-center gap-2">
-						<input
-							type="number"
-							bind:value={editWidth}
-							min="640"
-							max="7680"
-							class="w-20 px-2 py-1 rounded text-sm text-right font-mono"
-							style="background: var(--bg-raised); border: 1px solid var(--border); color: var(--text-primary); outline: none"
-						/>
-						<span class="text-xs" style="color: var(--text-muted)">×</span>
-						<input
-							type="number"
-							bind:value={editHeight}
-							min="480"
-							max="4320"
-							class="w-20 px-2 py-1 rounded text-sm text-right font-mono"
-							style="background: var(--bg-raised); border: 1px solid var(--border); color: var(--text-primary); outline: none"
-						/>
-						<span class="text-xs" style="color: var(--text-muted)">px</span>
+						<button
+							class="text-xs px-3 py-1.5 rounded"
+							style="background: var(--bg-raised); color: var(--text-secondary)"
+							onclick={() => commands.openInstanceFolder(openedInst!.id)}
+							title="Open .minecraft folder"
+						>
+							Open folder
+						</button>
+						<button
+							class="w-6 h-6 rounded flex items-center justify-center text-xs"
+							style="background: var(--bg-raised); color: var(--text-muted)"
+							onclick={() => (openedInst = null)}
+							title="Close"
+						>✕</button>
 					</div>
 				</div>
 
-				{#if editError}
-					<p class="text-xs select-text cursor-text" style="color: var(--danger)">{editError}</p>
-				{/if}
-
-				<div class="flex gap-2 justify-end">
-					<button
-						class="px-4 py-1.5 rounded text-xs font-medium"
-						style="background: var(--bg-raised); color: var(--text-secondary)"
-						onclick={() => (editingInst = null)}
-					>Cancel</button>
-					<button
-						class="px-4 py-1.5 rounded text-xs font-medium disabled:opacity-50"
-						style="background: var(--accent); color: #fff"
-						onclick={saveEdit}
-						disabled={editSaving || !editName.trim()}
-					>
-						{editSaving ? 'Saving…' : 'Save'}
-					</button>
+				<!-- Tabs -->
+				<div class="flex gap-1 border-b" style="border-color: var(--border)">
+					{#each ['mods', 'resourcepacks', 'shaderpacks', 'saves', 'screenshots'] as tab}
+						<button
+							class="px-3 py-1.5 text-xs font-medium rounded-t transition-colors capitalize"
+							style="background: {activeTab === tab ? 'var(--bg-raised)' : 'transparent'}; color: {activeTab === tab ? 'var(--text-primary)' : 'var(--text-muted)'}; border-bottom: 2px solid {activeTab === tab ? 'var(--accent)' : 'transparent'}"
+							onclick={() => loadTab(tab as typeof activeTab, openedInst!.id)}
+						>
+							{tab}
+						</button>
+					{/each}
 				</div>
+
+				<!-- Tab content -->
+				{#if activeTab === 'mods'}
+					{#if openedInst.mods.length === 0}
+						<p class="text-xs" style="color: var(--text-muted)">No mods installed. Browse mods to add some.</p>
+					{:else}
+						<div class="flex flex-col gap-2">
+							{#each openedInst.mods as mod}
+								<div class="flex items-center justify-between px-3 py-2 rounded" style="background: var(--bg-raised)">
+									<div>
+										<span class="text-sm font-medium">{mod.name}</span>
+										<span class="text-xs ml-2" style="color: var(--text-muted)">{mod.version}</span>
+									</div>
+									<button
+										class="text-xs px-2 py-1 rounded"
+										style="background: var(--danger); color: #fff"
+										onclick={async () => {
+											try {
+												await commands.removeMod(openedInst!.id, mod.id);
+												instances.update((list) =>
+													list.map((i) =>
+														i.id === openedInst!.id
+															? { ...i, mods: i.mods.filter((m) => m.id !== mod.id) }
+															: i
+													)
+												);
+												openedInst = { ...openedInst!, mods: openedInst!.mods.filter((m) => m.id !== mod.id) };
+											} catch (e) {
+												alert(String(e));
+											}
+										}}
+									>Remove</button>
+								</div>
+							{/each}
+						</div>
+					{/if}
+				{:else if folderLoading}
+					<p class="text-xs" style="color: var(--text-muted)">Loading…</p>
+				{:else if folderContents.length === 0}
+					<p class="text-xs" style="color: var(--text-muted)">No files in this folder.</p>
+				{:else}
+					<div class="flex flex-col gap-1">
+						{#each folderContents as file}
+							<div class="px-3 py-2 rounded text-xs font-mono" style="background: var(--bg-raised); color: var(--text-secondary)">{file}</div>
+						{/each}
+					</div>
+				{/if}
 			</div>
 		{/if}
 	{/if}
