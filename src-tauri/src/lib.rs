@@ -74,6 +74,18 @@ fn create_instance(
 }
 
 #[tauri::command]
+fn update_instance(
+    app: AppHandle,
+    id: String,
+    name: Option<String>,
+    allocated_ram_mb: Option<u32>,
+    resolution_width: Option<u32>,
+    resolution_height: Option<u32>,
+) -> Result<Instance, CirrusError> {
+    instance::update_instance(&app, &id, name, allocated_ram_mb, resolution_width, resolution_height)
+}
+
+#[tauri::command]
 fn delete_instance(app: AppHandle, id: String) -> Result<(), CirrusError> {
     instance::delete_instance(&app, &id)
 }
@@ -220,6 +232,7 @@ pub fn run() {
             logout,
             list_instances,
             create_instance,
+            update_instance,
             delete_instance,
             get_instance,
             launch_instance,

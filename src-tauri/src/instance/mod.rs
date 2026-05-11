@@ -152,6 +152,35 @@ pub fn create_instance(
     Ok(inst)
 }
 
+pub fn update_instance(
+    app: &AppHandle,
+    id: &str,
+    name: Option<String>,
+    allocated_ram_mb: Option<u32>,
+    resolution_width: Option<u32>,
+    resolution_height: Option<u32>,
+) -> Result<Instance, CirrusError> {
+    let mut inst = get_instance(app, id)?;
+    if let Some(n) = name {
+        let n = n.trim().to_string();
+        if n.is_empty() {
+            return Err(CirrusError::Instance("Name cannot be empty".into()));
+        }
+        inst.name = n;
+    }
+    if let Some(ram) = allocated_ram_mb {
+        inst.allocated_ram_mb = ram.clamp(512, 65536);
+    }
+    if let Some(w) = resolution_width {
+        inst.resolution.width = w;
+    }
+    if let Some(h) = resolution_height {
+        inst.resolution.height = h;
+    }
+    save_instance(app, &inst)?;
+    Ok(inst)
+}
+
 pub fn delete_instance(app: &AppHandle, id: &str) -> Result<(), CirrusError> {
     let dir = instance_dir(app, id)?;
     if dir.exists() {

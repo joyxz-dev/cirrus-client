@@ -12,13 +12,32 @@
 	let clientIdError = $state('');
 	let showClientIdInput = $state(false);
 
+	// Instance settings (local edits before saving)
+	let editingId = $state<string | null>(null);
+	let ramMb = $state(2048);
+	let resWidth = $state(1920);
+	let resHeight = $state(1080);
+	let settingsSaving = $state(false);
+	let settingsSaved = $state(false);
+	let settingsError = $state('');
+
 	onMount(async () => {
 		try {
 			const stored = await commands.getClientId();
-			if (stored) {
-				clientId = stored;
-			}
+			if (stored) clientId = stored;
 		} catch {}
+	});
+
+	// Sync local state when selected instance changes
+	$effect(() => {
+		if (selected && selected.id !== editingId) {
+			editingId = selected.id;
+			ramMb = selected.allocatedRamMb;
+			resWidth = selected.resolution.width;
+			resHeight = selected.resolution.height;
+			settingsSaved = false;
+			settingsError = '';
+		}
 	});
 
 	async function saveClientId() {
@@ -34,6 +53,28 @@
 			clientIdError = String(e);
 		} finally {
 			clientIdSaving = false;
+		}
+	}
+
+	async function saveInstanceSettings() {
+		if (!selected) return;
+		settingsSaving = true;
+		settingsSaved = false;
+		settingsError = '';
+		try {
+			const updated = await commands.updateInstance(selected.id, {
+				allocatedRamMb: ramMb,
+				resolutionWidth: resWidth,
+				resolutionHeight: resHeight,
+			});
+			instances.update((list) => list.map((i) => (i.id === updated.id ? updated : i)));
+			selectedInstance.set(updated);
+			settingsSaved = true;
+			setTimeout(() => (settingsSaved = false), 3000);
+		} catch (e) {
+			settingsError = String(e);
+		} finally {
+			settingsSaving = false;
 		}
 	}
 
@@ -56,18 +97,17 @@
 		}
 	}
 
-	const maskedId = $derived(clientId.length > 8
-		? clientId.slice(0, 4) + '…' + clientId.slice(-4)
-		: clientId);
+	const maskedId = $derived(
+		clientId.length > 8 ? clientId.slice(0, 4) + '…' + clientId.slice(-4) : clientId
+	);
 </script>
 
 <div class="flex flex-col gap-6 max-w-xl">
 	<h1 class="text-xl font-semibold">Settings</h1>
 
-	<!-- Microsoft Auth Setup -->
+	<!-- Microsoft Auth -->
 	<section class="flex flex-col gap-3">
 		<h2 class="text-sm font-medium" style="color: var(--text-secondary)">Microsoft Authentication</h2>
-
 		<div class="p-4 rounded-lg border flex flex-col gap-3" style="background: var(--bg-surface); border-color: var(--border)">
 			<div class="flex items-start justify-between gap-4">
 				<div class="flex flex-col gap-1">
@@ -114,19 +154,17 @@
 				<p class="text-xs" style="color: var(--success)">Saved. Sign in will use the new client ID.</p>
 			{/if}
 
-			<!-- Setup instructions -->
-			<details class="group">
+			<details>
 				<summary class="text-xs cursor-pointer select-none" style="color: var(--text-muted)">
 					How to get a client ID ▸
 				</summary>
 				<ol class="mt-2 flex flex-col gap-1.5 text-xs" style="color: var(--text-secondary)">
 					<li>1. Go to <span class="font-mono" style="color: var(--accent)">portal.azure.com</span> and sign in.</li>
 					<li>2. Open <strong>Azure Active Directory → App registrations → New registration</strong>.</li>
-					<li>3. Name it anything (e.g. "Cirrus"), select <strong>Personal Microsoft accounts only</strong>.</li>
+					<li>3. Name it anything, select <strong>Personal Microsoft accounts only</strong>.</li>
 					<li>4. Leave redirect URI blank. Click <strong>Register</strong>.</li>
 					<li>5. Copy the <strong>Application (client) ID</strong> and paste it above.</li>
 					<li>6. Go to <strong>Authentication</strong>, enable <strong>Allow public client flows</strong>, save.</li>
-					<li>7. Go to <strong>API permissions → Add → Xbox Live → XboxLive.signin</strong>, grant it.</li>
 				</ol>
 			</details>
 		</div>
@@ -139,6 +177,65 @@
 				Instance — {selected.name}
 			</h2>
 
+			<!-- RAM -->
+			<div class="p-4 rounded-lg border flex flex-col gap-3" style="background: var(--bg-surface); border-color: var(--border)">
+				<div class="flex items-center justify-between">
+					<span class="text-sm font-medium">Allocated RAM</span>
+					<div class="flex items-center gap-1.5">
+						<input
+							type="number"
+							bind:value={ramMb}
+							min="512"
+							max="65536"
+							step="256"
+							class="w-20 px-2 py-1 rounded text-sm text-right font-mono"
+							style="background: var(--bg-raised); border: 1px solid var(--border); color: var(--accent); outline: none"
+						/>
+						<span class="text-xs" style="color: var(--text-muted)">MB</span>
+					</div>
+				</div>
+				<input
+					type="range"
+					bind:value={ramMb}
+					min="512"
+					max="16384"
+					step="256"
+					class="w-full accent-[--accent]"
+					style="accent-color: var(--accent)"
+				/>
+				<div class="flex justify-between text-xs" style="color: var(--text-muted)">
+					<span>512 MB</span>
+					<span>16 GB</span>
+				</div>
+			</div>
+
+			<!-- Resolution -->
+			<div class="p-4 rounded-lg border flex items-center justify-between gap-4"
+				style="background: var(--bg-surface); border-color: var(--border)">
+				<span class="text-sm font-medium">Resolution</span>
+				<div class="flex items-center gap-2">
+					<input
+						type="number"
+						bind:value={resWidth}
+						min="640"
+						max="7680"
+						class="w-20 px-2 py-1 rounded text-sm text-right font-mono"
+						style="background: var(--bg-raised); border: 1px solid var(--border); color: var(--text-primary); outline: none"
+					/>
+					<span class="text-xs" style="color: var(--text-muted)">×</span>
+					<input
+						type="number"
+						bind:value={resHeight}
+						min="480"
+						max="4320"
+						class="w-20 px-2 py-1 rounded text-sm text-right font-mono"
+						style="background: var(--bg-raised); border: 1px solid var(--border); color: var(--text-primary); outline: none"
+					/>
+					<span class="text-xs" style="color: var(--text-muted)">px</span>
+				</div>
+			</div>
+
+			<!-- Sync -->
 			<div class="flex items-center justify-between p-4 rounded-lg border"
 				style="background: var(--bg-surface); border-color: var(--border)">
 				<div class="flex flex-col gap-0.5">
@@ -160,13 +257,22 @@
 				</button>
 			</div>
 
-			<div class="flex items-center justify-between p-4 rounded-lg border"
-				style="background: var(--bg-surface); border-color: var(--border)">
-				<div>
-					<span class="text-sm font-medium">Allocated RAM</span>
-					<p class="text-xs" style="color: var(--text-secondary)">{selected.allocatedRamMb} MB</p>
-				</div>
-				<span class="text-xs" style="color: var(--text-muted)">Edit instance.json to change</span>
+			<!-- Save -->
+			<div class="flex items-center justify-end gap-3">
+				{#if settingsError}
+					<p class="text-xs flex-1 select-text cursor-text" style="color: var(--danger)">{settingsError}</p>
+				{/if}
+				{#if settingsSaved}
+					<p class="text-xs" style="color: var(--success)">Saved.</p>
+				{/if}
+				<button
+					class="px-4 py-2 rounded text-sm font-medium disabled:opacity-50"
+					style="background: var(--accent); color: #fff"
+					onclick={saveInstanceSettings}
+					disabled={settingsSaving}
+				>
+					{settingsSaving ? 'Saving…' : 'Save changes'}
+				</button>
 			</div>
 		</section>
 	{:else}

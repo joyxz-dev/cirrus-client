@@ -100,6 +100,8 @@ export const commands = {
 	listInstances: () => invoke<Instance[]>('list_instances'),
 	createInstance: (name: string, mcVersion: string, loader: Loader, loaderVersion?: string) =>
 		invoke<Instance>('create_instance', { name, mcVersion, loader, loaderVersion }),
+	updateInstance: (id: string, opts: { name?: string; allocatedRamMb?: number; resolutionWidth?: number; resolutionHeight?: number }) =>
+		invoke<Instance>('update_instance', { id, ...opts }),
 	deleteInstance: (id: string) => invoke<void>('delete_instance', { id }),
 	getInstance: (id: string) => invoke<Instance>('get_instance', { id }),
 	launchInstance: (id: string) => invoke<void>('launch_instance', { id }),
