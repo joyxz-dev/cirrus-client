@@ -62,17 +62,25 @@
 	<div class="flex items-center gap-3 mb-6">
 		<div class="flex items-center gap-1">
 			<button
-				class="w-8 h-8 rounded flex items-center justify-center text-base transition-colors"
+				class="w-8 h-8 rounded flex items-center justify-center transition-colors hover:brightness-110"
 				style="background: var(--bg-raised); color: var(--text-secondary)"
 				onclick={() => history.back()}
 				title="Back"
-			>&#8592;</button>
+			>
+				<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+					<polyline points="10 12 6 8 10 4" />
+				</svg>
+			</button>
 			<button
-				class="w-8 h-8 rounded flex items-center justify-center text-base transition-colors"
+				class="w-8 h-8 rounded flex items-center justify-center transition-colors hover:brightness-110"
 				style="background: var(--bg-raised); color: var(--text-secondary)"
 				onclick={() => history.forward()}
 				title="Forward"
-			>&#8594;</button>
+			>
+				<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+					<polyline points="6 4 10 8 6 12" />
+				</svg>
+			</button>
 		</div>
 
 		{#if inst}
