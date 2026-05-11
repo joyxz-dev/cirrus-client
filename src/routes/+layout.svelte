@@ -29,7 +29,7 @@
 
 <div class="flex h-screen w-screen overflow-hidden" style="background: var(--bg-base)">
 	<Sidebar />
-	<main class="flex-1 overflow-auto p-6">
+	<main class="flex-1 overflow-auto p-7" style="scrollbar-gutter: stable">
 		{@render children()}
 	</main>
 </div>
