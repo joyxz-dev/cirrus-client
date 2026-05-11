@@ -1,7 +1,10 @@
 <script lang="ts">
+	import { onMount } from 'svelte';
 	import { instances, selectedInstance } from '$lib/stores/instances';
 	import { commands, type ModResult, type ModSearchResult } from '$lib/tauri';
 	import ModCard from '$lib/components/ModCard.svelte';
+
+	type SortIndex = 'downloads' | 'newest' | 'updated' | 'relevance';
 
 	let query = $state('');
 	let results = $state<ModSearchResult | null>(null);
@@ -10,19 +13,41 @@
 	let installing = $state<Record<string, boolean>>({});
 	let removing = $state<Record<string, boolean>>({});
 	let tab = $state<'browse' | 'installed'>('browse');
+	let sortIndex = $state<SortIndex>('downloads');
+	let loaderFilter = $state('');
+	let versionFilter = $state('');
+
+	const LOADERS: string[] = ['', 'fabric', 'forge', 'quilt', 'neoforge'];
+	const LOADER_LABELS: Record<string, string> = {
+		'': 'All', fabric: 'Fabric', forge: 'Forge', quilt: 'Quilt', neoforge: 'NeoForge',
+	};
+	const SORTS: { value: SortIndex; label: string }[] = [
+		{ value: 'downloads', label: 'Popular' },
+		{ value: 'newest',    label: 'New' },
+		{ value: 'updated',   label: 'Updated' },
+		{ value: 'relevance', label: 'Relevant' },
+	];
 
 	const selected = $derived($selectedInstance ?? $instances[0] ?? null);
 	const installedMods = $derived(selected?.mods ?? []);
 
-	async function handleSearch() {
-		if (!query.trim()) return;
+	onMount(async () => {
+		if (selected) {
+			loaderFilter = selected.loader !== 'vanilla' ? selected.loader : '';
+			versionFilter = selected.mcVersion;
+		}
+		await doSearch();
+	});
+
+	async function doSearch() {
 		searching = true;
 		searchError = null;
 		try {
 			results = await commands.searchMods({
 				query: query.trim(),
-				loader: selected?.loader !== 'vanilla' ? selected?.loader : undefined,
-				mcVersion: selected?.mcVersion,
+				loader: loaderFilter || undefined,
+				mcVersion: versionFilter || undefined,
+				index: sortIndex,
 				offset: 0,
 				limit: 20,
 			});
@@ -32,6 +57,9 @@
 			searching = false;
 		}
 	}
+
+	function setSort(s: SortIndex) { sortIndex = s; doSearch(); }
+	function setLoader(l: string)  { loaderFilter = l; doSearch(); }
 
 	async function handleInstall(mod: ModResult) {
 		if (!selected) return;
@@ -95,33 +123,92 @@
 		</div>
 
 		{#if tab === 'browse'}
+			<!-- Search -->
 			<div class="flex gap-2">
 				<input
 					bind:value={query}
 					class="flex-1 px-3 py-2 rounded text-sm"
 					style="background: var(--bg-surface); border: 1px solid var(--border); color: var(--text-primary); outline: none"
-					placeholder="Search mods on Modrinth…"
-					onkeydown={(e) => e.key === 'Enter' && handleSearch()}
+					placeholder="Search mods…"
+					onkeydown={(e) => e.key === 'Enter' && doSearch()}
 				/>
 				<button
 					class="px-4 py-2 rounded text-sm font-medium disabled:opacity-50"
 					style="background: var(--accent); color: #fff"
-					onclick={handleSearch}
-					disabled={searching || !query.trim()}
+					onclick={doSearch}
+					disabled={searching}
 				>
-					{searching ? 'Searching…' : 'Search'}
+					{searching ? '…' : 'Search'}
 				</button>
 			</div>
 
+			<!-- Filters -->
+			<div class="flex flex-col gap-2 pb-1">
+				<!-- Sort -->
+				<div class="flex items-center gap-3">
+					<span class="text-xs w-14 flex-shrink-0" style="color: var(--text-muted)">Sort</span>
+					<div class="flex gap-1">
+						{#each SORTS as sort}
+							<button
+								class="px-2.5 py-1 rounded text-xs font-medium transition-colors"
+								style="background: {sortIndex === sort.value ? 'var(--accent)' : 'var(--bg-surface)'}; color: {sortIndex === sort.value ? '#fff' : 'var(--text-secondary)'}"
+								onclick={() => setSort(sort.value)}
+							>{sort.label}</button>
+						{/each}
+					</div>
+				</div>
+
+				<!-- Loader -->
+				<div class="flex items-center gap-3">
+					<span class="text-xs w-14 flex-shrink-0" style="color: var(--text-muted)">Loader</span>
+					<div class="flex gap-1">
+						{#each LOADERS as loader}
+							<button
+								class="px-2.5 py-1 rounded text-xs font-medium transition-colors"
+								style="background: {loaderFilter === loader ? 'var(--accent)' : 'var(--bg-surface)'}; color: {loaderFilter === loader ? '#fff' : 'var(--text-secondary)'}"
+								onclick={() => setLoader(loader)}
+							>{LOADER_LABELS[loader]}</button>
+						{/each}
+					</div>
+				</div>
+
+				<!-- Version -->
+				<div class="flex items-center gap-3">
+					<span class="text-xs w-14 flex-shrink-0" style="color: var(--text-muted)">Version</span>
+					<div class="flex items-center gap-1">
+						<input
+							bind:value={versionFilter}
+							class="px-2.5 py-1 rounded text-xs"
+							style="width: 6rem; background: var(--bg-surface); border: 1px solid var(--border); color: var(--text-primary); outline: none"
+							placeholder="Any"
+							onblur={doSearch}
+							onkeydown={(e) => e.key === 'Enter' && doSearch()}
+						/>
+						{#if versionFilter}
+							<button
+								class="text-xs leading-none px-1"
+								style="color: var(--text-muted)"
+								onclick={() => { versionFilter = ''; doSearch(); }}
+							>✕</button>
+						{/if}
+					</div>
+				</div>
+			</div>
+
 			{#if searchError}
-				<p class="text-xs" style="color: var(--danger)">{searchError}</p>
+				<p class="text-xs select-text cursor-text" style="color: var(--danger)">{searchError}</p>
 			{/if}
 
-			{#if results}
-				<div class="flex flex-col gap-2">
-					{#if results.hits.length === 0}
-						<p class="text-sm" style="color: var(--text-muted)">No mods found.</p>
-					{:else}
+			<!-- Results -->
+			{#if searching}
+				<div class="flex items-center justify-center py-16">
+					<p class="text-sm" style="color: var(--text-muted)">Loading…</p>
+				</div>
+			{:else if results}
+				{#if results.hits.length === 0}
+					<p class="text-sm py-4" style="color: var(--text-muted)">No mods found.</p>
+				{:else}
+					<div class="flex flex-col gap-2">
 						{#each results.hits as mod}
 							<ModCard
 								{mod}
@@ -130,19 +217,13 @@
 								oninstall={() => handleInstall(mod)}
 							/>
 						{/each}
-					{/if}
-				</div>
-			{:else if !searching}
-				<div class="flex flex-col items-center gap-3 py-12">
-					<span class="text-4xl">🧩</span>
-					<p class="text-sm" style="color: var(--text-muted)">Search for mods above.</p>
-				</div>
+					</div>
+				{/if}
 			{/if}
 		{:else}
 			<!-- Installed mods -->
 			{#if installedMods.length === 0}
 				<div class="flex flex-col items-center gap-3 py-12">
-					<span class="text-4xl">📭</span>
 					<p class="text-sm" style="color: var(--text-muted)">No mods installed yet.</p>
 				</div>
 			{:else}

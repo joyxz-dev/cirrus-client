@@ -14,6 +14,7 @@ pub struct ModSearchQuery {
     pub loader: Option<String>,
     pub mc_version: Option<String>,
     pub category: Option<String>,
+    pub index: Option<String>,
     pub offset: u32,
     pub limit: u32,
 }
@@ -104,13 +105,14 @@ pub async fn search_mods(
     }
 
     let facets_json = serde_json::to_string(&facets)?;
+    let index = query.index.as_deref().unwrap_or("downloads");
 
     let resp: ModrinthSearchResponse = client
         .get(format!("{MODRINTH_BASE}/search"))
         .query(&[
             ("query", query.query.as_str()),
             ("facets", &facets_json),
-            ("index", "relevance"),
+            ("index", index),
             ("offset", &query.offset.to_string()),
             ("limit", &query.limit.to_string()),
         ])

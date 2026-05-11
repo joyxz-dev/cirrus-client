@@ -48,6 +48,7 @@ export interface ModSearchQuery {
 	loader?: string;
 	mcVersion?: string;
 	category?: string;
+	index?: string;
 	offset: number;
 	limit: number;
 }
