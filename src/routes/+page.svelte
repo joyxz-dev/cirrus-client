@@ -9,7 +9,14 @@
 	import ProgressBar from '$lib/components/ProgressBar.svelte';
 
 	let authChallenge: { user_code: string; verification_uri: string; message: string } | null = $state(null);
+	let codeCopied = $state(false);
 	const unlisteners: (() => void)[] = [];
+
+	async function copyCode(code: string) {
+		await navigator.clipboard.writeText(code);
+		codeCopied = true;
+		setTimeout(() => (codeCopied = false), 2000);
+	}
 
 	onMount(async () => {
 		const { listen } = await import('@tauri-apps/api/event');
@@ -112,19 +119,33 @@
 
 	<!-- Auth challenge -->
 	{#if authChallenge}
-		<div class="p-4 rounded-lg border" style="background: var(--bg-surface); border-color: var(--border)">
+		<div class="p-4 rounded-lg border relative" style="background: var(--bg-surface); border-color: var(--border)">
 			<p class="text-sm mb-2" style="color: var(--text-secondary)">
 				Go to <strong style="color: var(--text-primary)">{authChallenge.verification_uri}</strong> and enter:
 			</p>
-			<div class="text-3xl font-mono font-bold tracking-widest" style="color: var(--accent)">
+			<button
+				class="text-3xl font-mono font-bold tracking-widest cursor-pointer transition-opacity hover:opacity-70 active:opacity-50"
+				style="color: var(--accent); background: none; border: none; padding: 0"
+				onclick={() => copyCode(authChallenge!.user_code)}
+				title="Click to copy"
+			>
 				{authChallenge.user_code}
-			</div>
-			<p class="text-xs mt-2" style="color: var(--text-muted)">Waiting for sign-in…</p>
+			</button>
+			<p class="text-xs mt-2" style="color: var(--text-muted)">Waiting for sign-in… · Click code to copy</p>
+
+			{#if codeCopied}
+				<div
+					class="absolute bottom-3 right-3 text-xs px-2 py-1 rounded"
+					style="background: var(--success); color: #fff"
+				>
+					Code copied!
+				</div>
+			{/if}
 		</div>
 	{/if}
 
 	{#if $authError}
-		<p class="text-sm" style="color: var(--danger)">Sign-in error: {$authError}</p>
+		<p class="text-sm select-text cursor-text" style="color: var(--danger)">Sign-in error: {$authError}</p>
 	{/if}
 
 	<!-- Main content -->
@@ -170,7 +191,7 @@
 				{/if}
 
 				{#if $launchError}
-					<p class="text-xs" style="color: var(--danger)">{$launchError}</p>
+					<p class="text-xs select-text cursor-text" style="color: var(--danger)">{$launchError}</p>
 				{/if}
 
 				<div class="flex items-center justify-between">

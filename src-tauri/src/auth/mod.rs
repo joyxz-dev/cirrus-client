@@ -37,7 +37,7 @@ fn resolve_client_id(app: &AppHandle) -> Result<String, CirrusError> {
         return Ok(id);
     }
     // 2. Compile-time env var (set via .env at build time)
-    if let Some(id) = option_env!("MSA_CLIENT_ID") {
+    if let Some(id) = option_env!("AZURE_CLIENT_ID") {
         return Ok(id.to_string());
     }
     Err(CirrusError::Auth(

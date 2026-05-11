@@ -28,8 +28,17 @@ struct XstsResponse {
 }
 
 #[derive(Deserialize)]
+struct XstsErrorResponse {
+    #[serde(rename = "XErr")]
+    xerr: Option<u64>,
+    #[serde(rename = "Message")]
+    message: Option<String>,
+}
+
+#[derive(Deserialize)]
 struct McAuthResponse {
     access_token: String,
+    expires_in: Option<u64>,
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
@@ -59,10 +68,11 @@ pub async fn authenticate(
 
     let xbl_token = Zeroizing::new(xbl.token);
     let xsts_token = Zeroizing::new(get_xsts_token(client, &xbl_token).await?);
-    let mc_token = Zeroizing::new(get_mc_token(client, &xsts_token, &user_hash).await?);
+    let (mc_token_raw, expires_in) = get_mc_token(client, &xsts_token, &user_hash).await?;
+    let mc_token = Zeroizing::new(mc_token_raw);
 
     let profile = get_profile(client, &mc_token).await?;
-    let expires_at = chrono::Utc::now().timestamp() as u64 + 86400;
+    let expires_at = chrono::Utc::now().timestamp() as u64 + expires_in;
 
     Ok(MinecraftSession {
         access_token: mc_token,
@@ -120,9 +130,19 @@ async fn get_xsts_token(
         .await?;
 
     if resp.status() == 401 {
-        return Err(CirrusError::Auth(
-            "Xbox account not eligible or 2FA required".into(),
-        ));
+        let err_body: XstsErrorResponse = resp.json().await.unwrap_or(XstsErrorResponse {
+            xerr: None,
+            message: None,
+        });
+        let msg = match err_body.xerr {
+            Some(2148916233) => "This Microsoft account has no Xbox account. Please create one at xbox.com.".into(),
+            Some(2148916235) => "Xbox Live is not available in your region.".into(),
+            Some(2148916236) | Some(2148916237) => "Adult verification required. Please complete it at xbox.com.".into(),
+            Some(2148916238) => "Child accounts must be added to a family by an adult.".into(),
+            Some(code) => format!("Xbox auth error (XErr={code})"),
+            None => err_body.message.unwrap_or_else(|| "Xbox account not eligible".into()),
+        };
+        return Err(CirrusError::Auth(msg));
     }
 
     let xsts: XstsResponse = resp.error_for_status()?.json().await?;
@@ -133,22 +153,29 @@ async fn get_mc_token(
     client: &reqwest::Client,
     xsts_token: &str,
     user_hash: &str,
-) -> Result<String, CirrusError> {
+) -> Result<(String, u64), CirrusError> {
     let body = serde_json::json!({
         "identityToken": format!("XBL3.0 x={user_hash};{xsts_token}")
     });
 
-    let resp: McAuthResponse = client
+    let resp = client
         .post("https://api.minecraftservices.com/authentication/login_with_xbox")
         .header("Content-Type", "application/json")
+        .header("Accept", "application/json")
         .json(&body)
         .send()
-        .await?
-        .error_for_status()?
-        .json()
         .await?;
 
-    Ok(resp.access_token)
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let body_text = resp.text().await.unwrap_or_default();
+        return Err(CirrusError::Auth(format!(
+            "Minecraft login failed ({status}): {body_text}"
+        )));
+    }
+
+    let parsed: McAuthResponse = resp.json().await?;
+    Ok((parsed.access_token, parsed.expires_in.unwrap_or(86400)))
 }
 
 async fn get_profile(
