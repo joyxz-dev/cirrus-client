@@ -1,42 +1,62 @@
-# sv
+# Cirrus
 
-Everything you need to build a Svelte project, powered by [`sv`](https://github.com/sveltejs/cli).
+A clean, lightweight Minecraft launcher built with Tauri v2 and SvelteKit.
 
-## Creating a project
+## Features
 
-If you're seeing this, you've probably already done this step. Congrats!
+- **Microsoft authentication** via device code flow — sign in with any Microsoft account that owns Minecraft
+- **Isolated instances** — every instance has its own mods, worlds, resource packs, screenshots, and config. Nothing bleeds between instances
+- **Mod browser** — search and install mods from Modrinth with one click, SHA512-verified before install
+- **Asset integrity** — every file downloaded from Mojang is SHA1-verified before use
+- **Optimized JVM args** — Aikar's flags applied automatically, RAM allocated based on your system
+- **Options sync** — share a single `options.txt` across all instances, or keep them separate per-instance
+- No ads. No upsells. No telemetry.
 
-```sh
-# create a new project
-npx sv create my-app
+## Stack
+
+| | |
+|---|---|
+| Framework | Tauri v2 |
+| Frontend | SvelteKit + Tailwind CSS |
+| Backend | Rust 2021 |
+| HTTP | reqwest (rustls, TLS enforced) |
+| Storage | tauri-plugin-store (OS-encrypted) |
+
+## Setup
+
+### Prerequisites
+
+- [Rust](https://rustup.rs)
+- [Node.js](https://nodejs.org) (v18+)
+- A Microsoft Azure app registration (public client, device code flow)
+
+### Configuration
+
+Create a `.env` file in the project root:
+
+```
+AZURE_CLIENT_ID=your-azure-client-id
 ```
 
-To recreate this project with the same configuration:
+Your Azure app registration must have:
+- Platform: **Mobile and desktop applications**
+- Redirect URI: `https://login.microsoftonline.com/common/oauth2/nativeclient`
+- Allow public client flows: **Yes**
+- Supported account types: **Personal Microsoft accounts**
+
+### Running
 
 ```sh
-# recreate this project
-npx sv@0.15.2 create --template minimal --types ts --install npm .
+npm install
+npm run tauri dev
 ```
 
-## Developing
-
-Once you've created a project and installed dependencies with `npm install` (or `pnpm install` or `yarn`), start a development server:
+### Building
 
 ```sh
-npm run dev
-
-# or start the server and open the app in a new browser tab
-npm run dev -- --open
+npm run tauri build
 ```
 
-## Building
+## Security
 
-To create a production version of your app:
-
-```sh
-npm run build
-```
-
-You can preview the production build with `npm run preview`.
-
-> To deploy your app, you may need to install an [adapter](https://svelte.dev/docs/kit/adapters) for your target environment.
+Tokens are never logged, stored in plaintext, or sent to the frontend. The MSA refresh token is the only credential persisted to disk, stored via OS-level encryption (DPAPI on Windows, Keychain on macOS, libsecret on Linux). All other tokens are held in memory only and zeroized after use.
