@@ -47,8 +47,6 @@
 				{instance.loaderVersion}
 			{/if}
 		</span>
-		{#if instance.mods.length > 0}
-			<span class="text-xs" style="color: var(--text-muted)">{instance.mods.length} mod{instance.mods.length !== 1 ? 's' : ''}</span>
-		{/if}
+		<span class="text-xs" style="color: var(--text-muted)">{instance.mods.length} mod{instance.mods.length !== 1 ? 's' : ''}</span>
 	</div>
 </button>

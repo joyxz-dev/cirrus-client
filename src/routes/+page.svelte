@@ -159,13 +159,11 @@
 		{:else}
 			<div class="grid gap-3" style="grid-template-columns: repeat(auto-fill, minmax(220px, 1fr))">
 				{#each $instances as inst}
-					<button
-						class="text-left w-full rounded-lg border transition-colors"
-						style="background: {$selectedInstance?.id === inst.id ? 'var(--bg-raised)' : 'var(--bg-surface)'}; border-color: {$selectedInstance?.id === inst.id ? 'var(--accent)' : 'var(--border)'}; padding: 0"
+					<InstanceCard
+						instance={inst}
+						selected={$selectedInstance?.id === inst.id}
 						onclick={() => selectedInstance.set(inst)}
-					>
-						<InstanceCard instance={inst} selected={$selectedInstance?.id === inst.id} />
-					</button>
+					/>
 				{/each}
 			</div>
 		{/if}
